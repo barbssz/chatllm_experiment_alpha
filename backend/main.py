@@ -1,28 +1,47 @@
 from __future__ import annotations
 
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import FastAPI
 from fastapi import HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from backend.database import Base, engine
+from backend.config import ALLOWED_ORIGINS
+from backend.routers.auth import router as auth_router
 from backend.routers.chat import router as chat_router
 
 
-Base.metadata.create_all(bind=engine)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    yield
 
-app = FastAPI(title="ChatLLM Experiment API")
+
+app = FastAPI(title="ChatLLM Experiment API", lifespan=lifespan)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request, exc: RequestValidationError):
+    # Nao devolve os inputs originais, que podem conter senhas invalidas.
+    return JSONResponse(status_code=422, content={
+        "detail": [
+            {key: error[key] for key in ("loc", "msg", "type")}
+            for error in exc.errors()
+        ]
+    })
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "X-Requested-With"],
 )
 
 
@@ -38,6 +57,7 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
 app.add_middleware(NoCacheMiddleware)
 
 app.include_router(chat_router)
+app.include_router(auth_router)
 
 NO_CACHE_HEADERS = {
     "Cache-Control": "no-cache, no-store, must-revalidate",

@@ -5,6 +5,92 @@ function createMessageId() {
 }
 
 function App() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [sessionError, setSessionError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
+  const sessionRequestRef = useRef(0);
+
+  const refreshSession = async () => {
+    const requestId = ++sessionRequestRef.current;
+    try {
+      const currentUser = await getCurrentUser();
+      if (requestId !== sessionRequestRef.current) return;
+      setUser(currentUser);
+      setSessionError("");
+    } catch (err) {
+      if (requestId !== sessionRequestRef.current) return;
+      if (err.status === 401) {
+        setUser(null);
+        setSessionError("");
+      } else {
+        setSessionError("Não foi possível verificar sua sessão. Tente novamente.");
+      }
+    } finally {
+      if (requestId === sessionRequestRef.current) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshSession();
+    // Atualiza a identidade quando o usuario volta de outra aba.
+    window.addEventListener("focus", refreshSession);
+    return () => {
+      sessionRequestRef.current += 1;
+      window.removeEventListener("focus", refreshSession);
+    };
+  }, []);
+
+  const authenticated = (currentUser) => {
+    sessionRequestRef.current += 1;
+    setUser(currentUser);
+    setNotice("");
+    setSessionError("");
+    setLogoutError("");
+  };
+
+  const sessionExpired = () => {
+    sessionRequestRef.current += 1;
+    setUser(null);
+    setNotice("Sua sessão expirou. Entre novamente para continuar.");
+  };
+
+  const logout = async () => {
+    if (loggingOut) return;
+    sessionRequestRef.current += 1;
+    setLoggingOut(true);
+    setLogoutError("");
+    try {
+      await logoutUser();
+      sessionRequestRef.current += 1;
+      setUser(null);
+      setNotice("Você saiu da sua conta.");
+    } catch (err) {
+      setLogoutError("Não foi possível confirmar a saída. Tente novamente.");
+    } finally {
+      setLoggingOut(false);
+    }
+  };
+
+  if (loading) return <main className="auth-page" role="status">Verificando sua sessão…</main>;
+  if (sessionError) return (
+    <main className="auth-page">
+      <div className="auth-card">
+        <p role="alert">{sessionError}</p>
+        <button className="auth-submit" onClick={refreshSession}>Tentar novamente</button>
+      </div>
+    </main>
+  );
+  if (!user) return <AuthForm onAuthenticated={authenticated} notice={notice} />;
+
+  // A chave e a desmontagem descartam mensagens e cancelam streams ao trocar de conta.
+  return <Chat key={user.id} user={user} onLogout={logout} loggingOut={loggingOut}
+    logoutError={logoutError} onSessionExpired={sessionExpired} />;
+}
+
+function Chat({ user, onLogout, loggingOut, logoutError, onSessionExpired }) {
   const [messages, setMessages] = useState([
     {
       id: createMessageId(),
@@ -36,14 +122,12 @@ function App() {
 
   const onStop = () => {
     abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
-    setBusy(false);
   };
 
   const onSubmit = async (event, inputRef) => {
     event.preventDefault();
     const cleaned = text.trim();
-    if (!cleaned || busy) return;
+    if (!cleaned || busy || loggingOut) return;
 
     setError("");
     const userMessage = { id: createMessageId(), role: "user", content: cleaned };
@@ -65,6 +149,7 @@ function App() {
         history: chatHistory,
         signal: abortController.signal,
         onDelta: (delta) => {
+          if (abortController.signal.aborted) return;
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === assistantMessageId
@@ -83,6 +168,10 @@ function App() {
         )
       );
     } catch (err) {
+      if (err.status === 401) {
+        onSessionExpired();
+        return;
+      }
       const aborted = err?.name === "AbortError";
       if (!aborted) {
         setError(err.message || "Falha inesperada ao gerar resposta.");
@@ -103,8 +192,10 @@ function App() {
         );
       }
     } finally {
-      abortControllerRef.current = null;
-      setBusy(false);
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+        setBusy(false);
+      }
     }
   };
 
@@ -112,7 +203,15 @@ function App() {
     <main className="app-shell">
       <header className="app-header">
         <div className="brand">ChatLLM Lab</div>
+        <div className="account-menu">
+          <span className="account-email" title={user.email}>{user.email}</span>
+          <button className="logout-button" disabled={loggingOut}
+            onClick={() => { onStop(); onLogout(); }}>
+            {loggingOut ? "Saindo…" : "Sair"}
+          </button>
+        </div>
       </header>
+      {logoutError && <p className="auth-error logout-error" role="alert">{logoutError}</p>}
 
       <section className="messages" aria-live="polite" ref={messagesRef}>
         <div className="messages-inner">

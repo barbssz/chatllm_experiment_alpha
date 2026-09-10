@@ -131,7 +131,8 @@ class TestGenerateReply:
                     user_message="Ola",
                     history=[],
                 )
-                assert model == "google/gemma-4-31b-it"
+                from backend.config import OPENROUTER_MODEL_DEFAULT
+                assert model == OPENROUTER_MODEL_DEFAULT
 
     @pytest.mark.asyncio
     async def test_raises_on_http_error(self):
@@ -241,7 +242,7 @@ class TestStreamReply:
 
         with patch("backend.services.openrouter.OPENROUTER_API_KEY", "sk-test"):
             with patch("httpx.AsyncClient", return_value=mock_client):
-                with pytest.raises(RuntimeError, match="OpenRouter retornou erro"):
+                with pytest.raises(OpenRouterConfigError, match="A chave OpenRouter"):
                     async for _ in stream_reply(user_message="Teste", history=[]):
                         pass
 

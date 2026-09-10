@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from backend.models import ChatMessage
+from backend.config import OPENROUTER_MODEL_DEFAULT
 
 
 class TestChatMessage:
@@ -20,7 +21,7 @@ class TestChatMessage:
         assert msg.session_key == "default"
         assert msg.role == "user"
         assert msg.content == "Ola, mundo!"
-        assert msg.model == "google/gemma-4-31b-it"
+        assert msg.model == OPENROUTER_MODEL_DEFAULT
         assert isinstance(msg.created_at, datetime)
 
     def test_create_message_custom_session(self, db_session):

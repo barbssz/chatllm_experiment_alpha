@@ -1,18 +1,53 @@
 const API_BASE = window.location.origin;
 
-async function sendMessageStream({ message, history, onDelta, signal }) {
-  const response = await fetch(`${API_BASE}/api/chat/stream`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history }),
+async function apiFetch(path, { method = "GET", body, signal } = {}) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method,
+    credentials: "same-origin",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Requested-With": "ChatLLM",
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
     signal,
   });
-
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    const detail = body?.detail || "Erro ao enviar mensagem para o servidor.";
-    throw new Error(detail);
+    const payload = await response.json().catch(() => ({}));
+    const detail = typeof payload.detail === "string"
+      ? payload.detail
+      : "Confira os campos informados e tente novamente.";
+    const error = new Error(detail);
+    error.status = response.status;
+    throw error;
   }
+  return response;
+}
+
+async function registerUser(email, password) {
+  const response = await apiFetch("/api/auth/register", { method: "POST", body: { email, password } });
+  return response.json();
+}
+
+async function loginUser(email, password) {
+  const response = await apiFetch("/api/auth/login", { method: "POST", body: { email, password } });
+  return response.json();
+}
+
+async function getCurrentUser() {
+  const response = await apiFetch("/api/auth/me");
+  return response.json();
+}
+
+async function logoutUser() {
+  await apiFetch("/api/auth/logout", { method: "POST" });
+}
+
+async function sendMessageStream({ message, history, onDelta, signal }) {
+  const response = await apiFetch("/api/chat/stream", {
+    method: "POST",
+    body: { message, history },
+    signal,
+  });
 
   if (!response.body) {
     throw new Error("Streaming nao suportado no ambiente atual.");

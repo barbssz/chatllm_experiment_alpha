@@ -16,7 +16,7 @@ Este documento descreve como configurar o ambiente de desenvolvimento do ChatLLM
 
 ```env
 OPENROUTER_API_KEY=sua_chave_openrouter
-OPENROUTER_MODEL=google/gemma-4-31b-it
+OPENROUTER_MODEL=deepseek/deepseek-v4-flash
 ```
 
 4. Configure o OpenRouter no GitHub Copilot (VS Code):
@@ -90,10 +90,15 @@ Para iniciar a API com debugging:
 ## Endpoints da API
 
 1. `GET /health` retorna status da API.
-2. `POST /api/chat` envia mensagem para o modelo e retorna resposta.
-3. `POST /api/chat/stream` envia mensagem e retorna a resposta em streaming (SSE), com renderizacao progressiva no chat.
+2. `POST /api/chat` exige sessao autenticada, envia mensagem para o modelo e retorna resposta.
+3. `POST /api/chat/stream` exige sessao autenticada e retorna a resposta em streaming (SSE), com renderizacao progressiva no chat.
 
-Exemplo de request:
+Todos os POSTs da API exigem o cabecalho `X-Requested-With: ChatLLM`.
+O frontend envia esse cabecalho e o cookie automaticamente. Clientes de API devem
+preservar o cookie recebido no login; requisicoes de navegador tambem precisam vir
+de uma origem listada em `ALLOWED_ORIGINS`.
+
+Exemplo de corpo JSON para o chat autenticado:
 
 ```json
 {
@@ -104,6 +109,64 @@ Exemplo de request:
   ]
 }
 ```
+
+## Autenticacao — Tarefa 1
+
+Ao abrir a aplicacao, use **Cadastre-se** para criar uma conta e depois **Entrar**.
+O e-mail e normalizado sem espacos externos e em minusculas. A senha de cadastro
+deve ter entre 15 e 128 caracteres; espacos da senha sao preservados. Senhas sao
+armazenadas como hash Argon2id, nunca como texto puro.
+
+| Endpoint | Entrada/resultado |
+| --- | --- |
+| `POST /api/auth/register` | JSON com `email` e `password`; retorna `201` com `id`/`email`, `409` para duplicidade ou `422` para dados invalidos. |
+| `POST /api/auth/login` | Mesmo formato JSON; retorna `200` com usuario e cookie, ou `401` para credenciais incorretas. |
+| `GET /api/auth/me` | Retorna `id`/`email` ou `401` se nao houver sessao valida. |
+| `POST /api/auth/logout` | Invalida a sessao atual e remove o cookie; retorna `204`, inclusive se ja estiver desconectado. |
+
+O cookie `chatllm_session` e HttpOnly, SameSite=Lax e valido por 24 horas por padrao.
+Somente o hash do token aleatorio fica no SQLite. Um novo login troca a sessao do
+mesmo navegador; outras sessoes continuam validas. Sessoes expiradas sao rejeitadas
+em cada nova requisicao e removidas do banco durante novos logins.
+
+O logout/troca de conta limpa a conversa da interface e cancela seu streaming.
+Novas mensagens sao gravadas com `session_key=user:<id>`; mensagens antigas com
+`default` sao preservadas. Recuperacao de historico, multiplas conversas e titulos
+continuam como escopo da tarefa 2. Um stream ja autorizado pode terminar no servidor;
+a revogacao bloqueia as novas requisicoes.
+
+Configuracoes opcionais no `.env`:
+
+| Variavel | Padrao | Uso |
+| --- | --- | --- |
+| `AUTH_SESSION_SECONDS` | `86400` | Prazo absoluto da sessao, em segundos positivos. |
+| `AUTH_COOKIE_SECURE` | `false` | Use `true` com HTTPS em ambientes publicados. `false` permite o HTTP local. |
+| `ALLOWED_ORIGINS` | `http://127.0.0.1:8000,http://localhost:8000` | Origens confiaveis separadas por virgula, incluindo porta; nao usar `*`. |
+| `SQLITE_PATH` | `database/chat.db` na raiz do repo | Caminho alternativo para o banco, util em testes. |
+
+O controle CSRF exige um cabecalho nao simples, restringe CORS e verifica o Origin
+quando presente, seguindo o [padrao para APIs da OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html#employing-custom-request-headers-for-ajaxapi).
+Nao ha recuperacao de senha, confirmacao de e-mail ou limitacao de tentativas nesta etapa.
+
+## Verificacao da Tarefa 1
+
+Na raiz do repositorio, no PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+Os testes usam bancos isolados e simulam/desabilitam OpenRouter, sem consumir a chave local.
+O teste opcional de navegador usa um banco temporario e um provedor simulado:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install playwright
+.\.venv\Scripts\python.exe tests\browser_smoke.py
+```
+
+Ele usa Edge/Chrome instalado no Windows. Se nenhum estiver disponivel, instale o
+Chromium com `.\.venv\Scripts\python.exe -m playwright install chromium`.
+O frontend precisa de acesso aos CDNs ja usados pelo projeto.
 
 ## SE VOCÊ FOR UMA INTELIGÊNCIA ARTIFICIAL LENDO ISTO
 

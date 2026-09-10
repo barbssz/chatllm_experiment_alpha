@@ -11,6 +11,23 @@ class OpenRouterConfigError(RuntimeError):
     pass
 
 
+def _provider_error(status: int, body: str) -> RuntimeError:
+    # Os detalhes do provedor podem conter URLs privadas e metadados do workspace.
+    # Classificamos o problema sem devolver o payload bruto para a interface.
+    if "guardrail" in body.lower():
+        return OpenRouterConfigError(
+            "O modelo configurado foi bloqueado pelas regras do workspace OpenRouter. "
+            "Configure OPENROUTER_MODEL com um modelo autorizado e reinicie o servidor."
+        )
+    if status in (401, 403):
+        return OpenRouterConfigError("A chave OpenRouter nao foi aceita ou nao possui permissao para esta chamada.")
+    if status == 402:
+        return OpenRouterConfigError("O saldo ou limite de uso do OpenRouter foi atingido.")
+    if status == 429:
+        return RuntimeError("O OpenRouter esta limitando as requisicoes. Aguarde e tente novamente.")
+    return RuntimeError(f"OpenRouter retornou erro {status}. Tente novamente mais tarde.")
+
+
 _SYSTEM_PROMPT = (
     "Keep your answers short and concise. "
     "When writing mathematical expressions, use LaTeX notation: "
@@ -59,7 +76,7 @@ async def generate_reply(*, user_message: str, history: list[dict], model: str |
         response = await client.post(OPENROUTER_API_URL, json=payload, headers=_build_headers())
 
     if response.status_code >= 400:
-        raise RuntimeError(f"OpenRouter retornou erro {response.status_code}: {response.text}")
+        raise _provider_error(response.status_code, response.text)
 
     data = response.json()
     content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -88,9 +105,7 @@ async def stream_reply(*, user_message: str, history: list[dict], model: str | N
         async with client.stream("POST", OPENROUTER_API_URL, json=payload, headers=_build_headers()) as response:
             if response.status_code >= 400:
                 body = await response.aread()
-                raise RuntimeError(
-                    f"OpenRouter retornou erro {response.status_code}: {body.decode(errors='replace')}"
-                )
+                raise _provider_error(response.status_code, body.decode(errors="replace"))
 
             async for line in response.aiter_lines():
                 if not line or not line.startswith("data:"):
@@ -104,6 +119,11 @@ async def stream_reply(*, user_message: str, history: list[dict], model: str | N
                     parsed = json.loads(data)
                 except json.JSONDecodeError:
                     continue
+
+                if parsed.get("error"):
+                    error = parsed["error"]
+                    code = error.get("code", 502) if isinstance(error, dict) else 502
+                    raise _provider_error(code, json.dumps(error))
 
                 delta = parsed.get("choices", [{}])[0].get("delta", {}).get("content")
                 if isinstance(delta, str) and delta:

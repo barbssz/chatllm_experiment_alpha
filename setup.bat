@@ -31,9 +31,8 @@ echo Instalando dependencias do backend
 ".venv\Scripts\python.exe" -m pip install -r backend\requirements.txt
 if errorlevel 1 exit /b 1
 
-if not exist ".env" (  
-    echo Copie o arquivo .env enviado por e-mail para a raiz do projeto    
-  )
+if not exist ".env" (
+    echo Copie o arquivo .env enviado por e-mail para a raiz do projeto
 )
 
 if /I "%~1"=="run" (
