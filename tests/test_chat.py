@@ -54,11 +54,15 @@ class TestChatRequiresAuthentication:
 
 
 class TestChatEndpoint:
-    def test_chat_reaches_model_layer_when_authenticated(self, authenticated_client: TestClient):
-        """Autenticado, a requisicao chega a camada do modelo (nao mais 401)."""
+    def test_chat_returns_reply_and_session_metadata(self, authenticated_client: TestClient):
+        """A resposta inclui o texto do modelo e os metadados da conversa."""
         response = authenticated_client.post("/api/chat", json={"message": "Ola"})
         assert response.status_code == 200
-        assert response.json() == {"reply": "Ola de volta", "model": "test-model"}
+        body = response.json()
+        assert body["reply"] == "Ola de volta"
+        assert body["model"] == "test-model"
+        assert body["session_id"] == "user:1"
+        assert body["title"] == "Ola"
 
     def test_chat_empty_message_rejected(self, authenticated_client: TestClient):
         """Autenticado, mensagem vazia deve ser rejeitada com 422 (Pydantic)."""
@@ -93,6 +97,7 @@ class TestChatStreamEndpoint:
         assert response.headers["content-type"].startswith("text/event-stream")
         assert '"delta": "Ola "' in response.text
         assert '"done": true' in response.text
+        assert '"session_id": "user:1"' in response.text
         messages = db_session.scalars(select(ChatMessage).order_by(ChatMessage.id)).all()
         assert [item.content for item in messages] == ["Ola", "Ola de volta"]
         assert {item.session_key for item in messages} == {"user:1"}

@@ -12,6 +12,7 @@ from backend.dependencies import get_current_user, require_csrf_protection
 from backend.models import ChatMessage, User
 from backend.schemas.chat import ChatRequest, ChatResponse
 from backend.services.openrouter import OpenRouterConfigError, generate_reply, stream_reply
+from backend.services.conversations import owned_session, legacy_session, conversation_history, save_turn
 
 
 router = APIRouter()
@@ -29,11 +30,13 @@ async def chat(
     csrf: None = Depends(require_csrf_protection),
     db: Session = Depends(get_db),
 ) -> ChatResponse:
-    session_key = f"user:{user.id}"
+    conversation = owned_session(db, user.id, payload.session_id) if payload.session_id else legacy_session(db, user.id, create=True)
+    session_key = conversation.id
+    history = conversation_history(db, session_key)
     try:
         reply, model_name = await generate_reply(
             user_message=payload.message,
-            history=[item.model_dump() for item in payload.history],
+            history=history,
             model=payload.model,
         )
     except OpenRouterConfigError as exc:
@@ -43,12 +46,8 @@ async def chat(
 
     resolved_model = payload.model or model_name or OPENROUTER_MODEL_DEFAULT
 
-    # Identifica o dono das mensagens; multiplas conversas/titulos ficam para a tarefa 2.
-    db.add(ChatMessage(session_key=session_key, role="user", content=payload.message, model=resolved_model))
-    db.add(ChatMessage(session_key=session_key, role="assistant", content=reply, model=resolved_model))
-    db.commit()
-
-    return ChatResponse(reply=reply, model=resolved_model)
+    title = save_turn(db, session_key, payload.message, reply, resolved_model)
+    return ChatResponse(reply=reply, model=resolved_model, session_id=session_key, title=title)
 
 
 @router.post("/api/chat/stream")
@@ -58,7 +57,9 @@ async def chat_stream(
     csrf: None = Depends(require_csrf_protection),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
-    session_key = f"user:{user.id}"
+    conversation = owned_session(db, user.id, payload.session_id) if payload.session_id else legacy_session(db, user.id, create=True)
+    session_key = conversation.id
+    history = conversation_history(db, session_key)
     resolved_model = payload.model or OPENROUTER_MODEL_DEFAULT
 
     async def event_generator():
@@ -66,7 +67,7 @@ async def chat_stream(
         try:
             async for delta in stream_reply(
                 user_message=payload.message,
-                history=[item.model_dump() for item in payload.history],
+                history=history,
                 model=payload.model,
             ):
                 full_reply += delta
@@ -77,27 +78,17 @@ async def chat_stream(
         except RuntimeError as exc:
             yield f"data: {json.dumps({'error': str(exc)}, ensure_ascii=True)}\n\n"
             return
+        finally:
+            # Persiste inclusive o trecho recebido se o navegador cancelar/trocar de conversa.
+            if full_reply.strip():
+                # A versao de FastAPI usada encerra a dependencia antes do streaming.
+                with Session(bind=db.get_bind()) as write_db:
+                    title = save_turn(write_db, session_key, payload.message, full_reply, resolved_model)
 
-        if full_reply.strip():
-            db.add(
-                ChatMessage(
-                    session_key=session_key,
-                    role="user",
-                    content=payload.message,
-                    model=resolved_model,
-                )
-            )
-            db.add(
-                ChatMessage(
-                    session_key=session_key,
-                    role="assistant",
-                    content=full_reply,
-                    model=resolved_model,
-                )
-            )
-            db.commit()
-
-        yield f"data: {json.dumps({'done': True}, ensure_ascii=True)}\n\n"
+        if not full_reply.strip():
+            yield f"data: {json.dumps({'error': 'O modelo nao retornou uma resposta.'})}\n\n"
+            return
+        yield f"data: {json.dumps({'done': True, 'session_id': session_key, 'title': title}, ensure_ascii=True)}\n\n"
 
     return StreamingResponse(
         event_generator(),

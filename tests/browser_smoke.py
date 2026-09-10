@@ -117,6 +117,19 @@ def smoke() -> None:
                 expect(page.locator(".bubble.assistant").last).to_contain_text("Resposta de teste.")
                 expect(page.get_by_role("button", name="Enviar", exact=True)).to_be_visible()
 
+                # Tarefa 2: sessoes com titulo automatico na barra lateral.
+                expect(page.locator(".sidebar-item")).to_have_count(1)
+                expect(page.locator(".sidebar-item").first).to_have_text("Mensagem privada de Alice")
+                page.get_by_role("button", name="+ Nova conversa").click()
+                expect(page.locator(".bubble")).to_have_count(1)
+                page.get_by_placeholder("Mensagem para ChatLLM Lab").fill("Segunda conversa de Alice")
+                page.get_by_role("button", name="Enviar", exact=True).click()
+                expect(page.locator(".bubble.assistant").last).to_contain_text("Resposta de teste.")
+                expect(page.locator(".sidebar-item")).to_have_count(2)
+                expect(page.locator(".sidebar-item").first).to_have_text("Segunda conversa de Alice")
+                page.locator(".sidebar-item").nth(1).click()
+                expect(page.get_by_text("Mensagem privada de Alice", exact=True)).to_have_count(1)
+
                 page.get_by_placeholder("Mensagem para ChatLLM Lab").fill("demorar")
                 page.get_by_role("button", name="Enviar", exact=True).click()
                 expect(page.get_by_role("button", name="Parar", exact=True)).to_be_visible()
@@ -157,7 +170,7 @@ def smoke() -> None:
                 expect(page.get_by_role("button", name="Entrar", exact=True)).to_be_visible()
                 assert not errors, errors
                 browser.close()
-                print("Browser smoke: cadastro, duplicidade, login, cookie, reload, streaming, parar, logout, troca de conta, expiracao e layout mobile OK.")
+                print("Browser smoke: cadastro, duplicidade, login, cookie, reload, streaming, parar, logout, troca de conta, expiracao, sessoes com titulo automatico e layout mobile OK.")
         finally:
             server.terminate()
             try:

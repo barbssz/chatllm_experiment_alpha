@@ -42,10 +42,25 @@ async function logoutUser() {
   await apiFetch("/api/auth/logout", { method: "POST" });
 }
 
-async function sendMessageStream({ message, history, onDelta, signal }) {
+async function listSessions() {
+  const response = await apiFetch("/api/sessions");
+  return response.json();
+}
+
+async function createSession() {
+  const response = await apiFetch("/api/sessions", { method: "POST" });
+  return response.json();
+}
+
+async function getSessionMessages(sessionId) {
+  const response = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`);
+  return response.json();
+}
+
+async function sendMessageStream({ message, sessionId, onDelta, onSession, signal }) {
   const response = await apiFetch("/api/chat/stream", {
     method: "POST",
-    body: { message, history },
+    body: sessionId ? { message, session_id: sessionId } : { message },
     signal,
   });
 
@@ -87,6 +102,10 @@ async function sendMessageStream({ message, history, onDelta, signal }) {
 
       if (payload.delta) {
         onDelta(payload.delta);
+      }
+
+      if (payload.done) {
+        onSession?.({ sessionId: payload.session_id, title: payload.title });
       }
     }
   }
