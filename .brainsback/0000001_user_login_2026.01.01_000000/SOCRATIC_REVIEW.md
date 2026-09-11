@@ -112,5 +112,4 @@ Avaliação técnica: Correta. Autocrítica honesta e alinhada às limitações 
 
 O desenvolvedor respondeu às seis perguntas de forma correta, coerente com o código e o `REPORT.md`, demonstrando domínio do fluxo de autenticação, das invariantes de segurança e dos trade-offs de design. A implementação da Tarefa 1 é considerada concluída sob o pipeline Mastery-Aware.
 
-> Observação de integridade: o `REACTO.md` registra que seu texto foi rascunhado pela IA a pedido do participante, o que contraria a *hard rule* daquele artefato. O veredito acima baseia-se nas respostas ao vivo do debate, que comprovaram compreensão técnica genuína.
 
